@@ -19,10 +19,10 @@ const MYPOS_CHECKOUT_URL = IS_PRODUCTION
   : 'https://www.mypos.com/vmp/checkout-demo';
 
 // MyPOS credentials
-const MYPOS_SID = process.env.MYPOS_CLIENT_ID || 'miWRnE8t6OPHyvEGyahKqFDM';
-const MYPOS_WALLET = process.env.MYPOS_WALLET || 'miWRnE8t6OPHyvEGyahKqFDM';
+const MYPOS_SID = process.env.MYPOS_CLIENT_ID || '1223015';
+const MYPOS_WALLET = process.env.MYPOS_WALLET || '40850018397';
 const MYPOS_PRIVATE_KEY = process.env.MYPOS_PRIVATE_KEY;
-const MYPOS_KEY_INDEX = 1;
+const MYPOS_KEY_INDEX = 2;  // ← CHANGED FROM 1 TO 2!
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // In-memory storage
@@ -31,21 +31,29 @@ const pendingPayments = new Map();
 // Generate MyPOS signature
 function generateMyPOSSignature(data) {
   try {
-    const concatenated = Object.keys(data)
+    // Sort keys alphabetically and filter out Signature
+    const sortedKeys = Object.keys(data)
       .filter(key => key !== 'Signature')
-      .sort()
+      .sort();
+    
+    // Concatenate values with DASH separator
+    const concatenated = sortedKeys
       .map(key => String(data[key]))
-      .join('');
-
+      .join('-');
+    
     console.log('Data to sign:', concatenated.substring(0, 100) + '...');
-
-    const hash = crypto.createHash('sha256').update(concatenated, 'utf8').digest();
-
-    const signature = crypto.sign('sha256', hash, {
+    
+    // Base64 encode the concatenated string
+    const base64Concatenated = Buffer.from(concatenated, 'utf8').toString('base64');
+    
+    console.log('Base64:', base64Concatenated.substring(0, 50) + '...');
+    
+    // Sign the Base64 string
+    const signature = crypto.sign('sha256', Buffer.from(base64Concatenated), {
       key: MYPOS_PRIVATE_KEY,
       padding: crypto.constants.RSA_PKCS1_PADDING
     });
-
+    
     const signatureBase64 = signature.toString('base64');
     
     console.log('✅ Signature generated');
@@ -432,6 +440,9 @@ app.post('/api/create-mypos-payment', async (req, res) => {
     
     console.log('=== Creating MyPOS Payment ===');
     console.log('Mode:', IS_PRODUCTION ? 'PRODUCTION' : 'TEST');
+    console.log('SID:', MYPOS_SID);
+    console.log('Wallet:', MYPOS_WALLET);
+    console.log('Key Index:', MYPOS_KEY_INDEX);
     console.log('Amount:', amount, currency);
 
     if (!MYPOS_PRIVATE_KEY) {
@@ -604,6 +615,9 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 App URL: ${APP_URL}`);
   console.log(`💳 MyPOS Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'TEST'}`);
+  console.log(`🏪 Store ID: ${MYPOS_SID}`);
+  console.log(`💰 Wallet: ${MYPOS_WALLET}`);
+  console.log(`🔑 Key Index: ${MYPOS_KEY_INDEX}`);
   console.log(`🔗 Checkout URL: ${MYPOS_CHECKOUT_URL}`);
   console.log(`🧪 Test signature: ${APP_URL}/test-signature`);
 });
