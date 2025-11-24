@@ -16,30 +16,3 @@
     "node": ">=18.0.0"
   }
 }
-```
-
-**.gitignore**:
-```
-node_modules/
-.env
-*.log
-.DS_Store
-```
-
-### 2. Deploy naar Render
-
-1. Ga naar Render Dashboard
-2. New + → Web Service
-3. Connect je GitHub repo
-4. Settings:
-   - **Name**: mypos-checkout
-   - **Build Command**: `npm install`
-   - **Start Command**: `node server.js`
-
-### 3. Environment Variables in Render
-```
-APP_URL = https://mypos-checkout.onrender.com
-
-MYPOS_CLIENT_ID = miWRnE8t6OPHyvEGyahKqFDM
-
-MYPOS_CLIENT_SECRET = a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A
