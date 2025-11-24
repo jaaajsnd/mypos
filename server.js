@@ -15,7 +15,7 @@ app.use(express.static('public'));
 // MyPOS credentials
 const MYPOS_CLIENT_ID = process.env.MYPOS_CLIENT_ID || 'miWRnE8t6OPHyvEGyahKqFDM';
 const MYPOS_CLIENT_SECRET = process.env.MYPOS_CLIENT_SECRET || 'a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A';
-const MYPOS_API_URL = 'https://www.mypos.com/vmp/checkout-demo';
+const MYPOS_API_URL = 'https://www.mypos.com/vmp/checkout';
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // In-memory storage
