@@ -15,7 +15,7 @@ app.use(express.static('public'));
 // MyPOS credentials
 const MYPOS_SID = process.env.MYPOS_CLIENT_ID || 'miWRnE8t6OPHyvEGyahKqFDM';
 const MYPOS_WALLET = process.env.MYPOS_WALLET || 'miWRnE8t6OPHyvEGyahKqFDM';
-const MYPOS_SECRET = process.env.MYPOS_CLIENT_SECRET || 'a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A';
+const MYPOS_PRIVATE_KEY = process.env.MYPOS_CLIENT_SECRET || 'a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A';
 const MYPOS_KEY_INDEX = 1;
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
@@ -36,7 +36,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
 });
 
-// Checkout page with Embedded SDK
+// Checkout page
 app.get('/checkout', async (req, res) => {
   const { amount, currency, order_id, return_url, cart_items } = req.query;
   
@@ -54,38 +54,12 @@ app.get('/checkout', async (req, res) => {
   }
 
   const sessionId = Date.now().toString();
-  const orderId = order_id || `ORDER-${sessionId}`;
-
-  // Prepare purchase data for SDK
-  const purchaseData = {
-    SID: MYPOS_SID,
-    WalletNumber: MYPOS_WALLET,
-    Amount: parseFloat(amount).toFixed(2),
-    Currency: currency.toUpperCase(),
-    OrderID: orderId,
-    URL_OK: `${APP_URL}/payment/success?session_id=${sessionId}`,
-    URL_Cancel: `${APP_URL}/payment/cancel?session_id=${sessionId}`,
-    URL_Notify: `${APP_URL}/webhook/mypos`,
-    KeyIndex: MYPOS_KEY_INDEX,
-    Note: cartData && cartData.items ? cartData.items.map(i => i.title).join(', ') : 'Order'
-  };
-
-  // Store session
-  pendingPayments.set(sessionId, {
-    amount,
-    currency,
-    orderId,
-    cartData,
-    return_url,
-    created_at: new Date()
-  });
 
   res.send(`
     <html>
       <head>
         <title>Payment - €${amount}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <script src="https://www.mypos.com/vmp/js/mypos-embedded-1.0.2.js"></script>
         <style>
           * { box-sizing: border-box; }
           body {
@@ -165,9 +139,24 @@ app.get('/checkout', async (req, res) => {
           .form-row .form-group {
             flex: 1;
           }
-          #mypos-container {
-            margin: 20px 0;
-            min-height: 200px;
+          .pay-button {
+            width: 100%;
+            padding: 16px;
+            background: #000;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+          }
+          .pay-button:hover {
+            background: #333;
+          }
+          .pay-button:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
           }
           .secure {
             text-align: center;
@@ -189,51 +178,6 @@ app.get('/checkout', async (req, res) => {
             padding: 20px;
             color: #666;
           }
-          .success-popup {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-            z-index: 9999;
-            text-align: center;
-            display: none;
-            min-width: 400px;
-          }
-          .success-popup.show {
-            display: block;
-          }
-          .success-popup-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 9998;
-            display: none;
-          }
-          .success-popup-overlay.show {
-            display: block;
-          }
-          .success-icon {
-            font-size: 60px;
-            color: #4CAF50;
-            margin-bottom: 20px;
-          }
-          .success-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 10px;
-          }
-          .success-text {
-            font-size: 16px;
-            color: #666;
-          }
           .back-button {
             display: block;
             text-align: center;
@@ -252,73 +196,66 @@ app.get('/checkout', async (req, res) => {
         <div class="container">
           <h1>💳 Secure Checkout</h1>
           <div class="amount">€${amount}</div>
-          <div class="description">Order ${orderId}</div>
+          <div class="description">Order ${order_id || ''}</div>
           
           <div id="error-message" class="error"></div>
-          <div id="loading-message" class="loading">Processing payment...</div>
+          <div id="loading-message" class="loading">Redirecting to payment...</div>
           
-          <!-- Success Popup -->
-          <div id="success-popup-overlay" class="success-popup-overlay"></div>
-          <div id="success-popup" class="success-popup">
-            <div class="success-icon">✓</div>
-            <div class="success-title">Payment Successful!</div>
-            <div class="success-text">Your payment has been processed successfully.</div>
-          </div>
-          
-          <div class="section">
-            <div class="section-title">Customer Information</div>
-            
-            <div class="form-row">
-              <div class="form-group">
-                <label for="firstName">First Name *</label>
-                <input type="text" id="firstName" placeholder="Sean" required>
+          <form id="payment-form">
+            <div class="section">
+              <div class="section-title">Customer Information</div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="firstName">First Name *</label>
+                  <input type="text" id="firstName" placeholder="Sean" required>
+                </div>
+                <div class="form-group">
+                  <label for="lastName">Last Name *</label>
+                  <input type="text" id="lastName" placeholder="O'Brien" required>
+                </div>
               </div>
+              
               <div class="form-group">
-                <label for="lastName">Last Name *</label>
-                <input type="text" id="lastName" placeholder="O'Brien" required>
+                <label for="email">Email *</label>
+                <input type="email" id="email" placeholder="sean@example.ie" required>
+              </div>
+              
+              <div class="form-group">
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" placeholder="+353 85 123 4567">
               </div>
             </div>
-            
-            <div class="form-group">
-              <label for="email">Email *</label>
-              <input type="email" id="email" placeholder="sean@example.ie" required>
-            </div>
-            
-            <div class="form-group">
-              <label for="phone">Phone Number</label>
-              <input type="tel" id="phone" placeholder="+353 85 123 4567">
-            </div>
-          </div>
 
-          <div class="section">
-            <div class="section-title">Billing Address</div>
-            
-            <div class="form-group">
-              <label for="address">Address *</label>
-              <input type="text" id="address" placeholder="12 O'Connell Street" required>
-            </div>
-            
-            <div class="form-row">
+            <div class="section">
+              <div class="section-title">Billing Address</div>
+              
               <div class="form-group">
-                <label for="postalCode">Eircode *</label>
-                <input type="text" id="postalCode" placeholder="D01 F5P2" required>
+                <label for="address">Address *</label>
+                <input type="text" id="address" placeholder="12 O'Connell Street" required>
               </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="postalCode">Eircode *</label>
+                  <input type="text" id="postalCode" placeholder="D01 F5P2" required>
+                </div>
+                <div class="form-group">
+                  <label for="city">City *</label>
+                  <input type="text" id="city" placeholder="Dublin" required>
+                </div>
+              </div>
+              
               <div class="form-group">
-                <label for="city">City *</label>
-                <input type="text" id="city" placeholder="Dublin" required>
+                <label for="country">Country *</label>
+                <input type="text" id="country" value="Ireland" required>
               </div>
             </div>
-            
-            <div class="form-group">
-              <label for="country">Country *</label>
-              <input type="text" id="country" value="Ireland" required>
-            </div>
-          </div>
 
-          <div class="section">
-            <div class="section-title">Payment Details</div>
-            <div id="mypos-container"></div>
-          </div>
+            <button type="submit" class="pay-button">
+              Continue to Payment
+            </button>
+          </form>
           
           <div class="secure">
             🔒 Secure payment with MyPOS
@@ -330,105 +267,71 @@ app.get('/checkout', async (req, res) => {
         <script>
           const cartData = ${cartData ? JSON.stringify(cartData) : 'null'};
           const sessionId = '${sessionId}';
-          const purchaseData = ${JSON.stringify(purchaseData)};
 
-          function validateCustomerInfo() {
-            const firstName = document.getElementById('firstName').value.trim();
-            const lastName = document.getElementById('lastName').value.trim();
-            const email = document.getElementById('email').value.trim();
-            const address = document.getElementById('address').value.trim();
-            const postalCode = document.getElementById('postalCode').value.trim();
-            const city = document.getElementById('city').value.trim();
-            const country = document.getElementById('country').value.trim();
+          document.getElementById('payment-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
             
-            if (!firstName || !lastName || !email || !address || !postalCode || !city || !country) {
+            const customerData = {
+              firstName: document.getElementById('firstName').value.trim(),
+              lastName: document.getElementById('lastName').value.trim(),
+              email: document.getElementById('email').value.trim(),
+              phone: document.getElementById('phone').value.trim(),
+              address: document.getElementById('address').value.trim(),
+              postalCode: document.getElementById('postalCode').value.trim(),
+              city: document.getElementById('city').value.trim(),
+              country: document.getElementById('country').value.trim()
+            };
+            
+            if (!customerData.firstName || !customerData.lastName || !customerData.email || 
+                !customerData.address || !customerData.postalCode || !customerData.city || !customerData.country) {
               document.getElementById('error-message').style.display = 'block';
               document.getElementById('error-message').innerHTML = '✗ Please fill in all required fields';
-              return false;
+              return;
             }
-            
-            return {
-              firstName,
-              lastName,
-              email,
-              phone: document.getElementById('phone').value.trim(),
-              address,
-              postalCode,
-              city,
-              country
-            };
-          }
 
-          // Add customer data to purchase
-          purchaseData.CustomerEmail = '';
-          purchaseData.CustomerFirstNames = '';
-          purchaseData.CustomerLastName = '';
-          purchaseData.CustomerAddress = '';
-          purchaseData.CustomerCity = '';
-          purchaseData.CustomerZIPCode = '';
-          purchaseData.CustomerCountry = 'IRL';
-          purchaseData.CustomerPhone = '';
+            document.getElementById('loading-message').style.display = 'block';
+            document.querySelector('.pay-button').disabled = true;
 
-          // Initialize MyPOS Embedded Checkout
-          try {
-            const checkout = new MYPOSSDK.Checkout({
-              container: 'mypos-container',
-              paymentData: purchaseData,
-              signature: '', // Will be generated on backend
-              development: false, // Set to true for testing
-              onSuccess: function(data) {
-                console.log('Payment successful:', data);
-                
-                // Show success popup
-                document.getElementById('loading-message').style.display = 'none';
-                document.getElementById('success-popup-overlay').classList.add('show');
-                document.getElementById('success-popup').classList.add('show');
-                
-                // Redirect after 2 seconds
-                setTimeout(() => {
-                  const returnUrl = '${return_url || APP_URL}';
-                  const separator = returnUrl.includes('?') ? '&' : '?';
-                  window.location.href = returnUrl + separator + 'session_id=' + sessionId;
-                }, 2000);
-              },
-              onError: function(error) {
-                console.error('Payment error:', error);
-                document.getElementById('loading-message').style.display = 'none';
-                document.getElementById('error-message').style.display = 'block';
-                document.getElementById('error-message').innerHTML = '✗ Payment failed: ' + (error.message || 'Please try again');
-              },
-              onCancel: function() {
-                console.log('Payment cancelled');
-                document.getElementById('loading-message').style.display = 'none';
-                document.getElementById('error-message').style.display = 'block';
-                document.getElementById('error-message').innerHTML = '✗ Payment was cancelled';
-              },
-              onSubmit: function() {
-                const customerData = validateCustomerInfo();
-                if (!customerData) {
-                  return false; // Prevent submission
+            try {
+              const response = await fetch('/api/create-mypos-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: sessionId,
+                  customerData: customerData,
+                  cartData: cartData,
+                  amount: '${amount}',
+                  currency: '${currency}',
+                  orderId: '${order_id || ''}',
+                  returnUrl: '${return_url || APP_URL}'
+                })
+              });
+
+              const data = await response.json();
+              console.log('Response:', data);
+
+              if (data.status === 'success' && data.formHtml) {
+                // Inject and submit form
+                const div = document.createElement('div');
+                div.innerHTML = data.formHtml;
+                document.body.appendChild(div);
+                const form = div.querySelector('form');
+                if (form) {
+                  form.submit();
                 }
-                
-                // Update purchase data with customer info
-                purchaseData.CustomerEmail = customerData.email;
-                purchaseData.CustomerFirstNames = customerData.firstName;
-                purchaseData.CustomerLastName = customerData.lastName;
-                purchaseData.CustomerAddress = customerData.address;
-                purchaseData.CustomerCity = customerData.city;
-                purchaseData.CustomerZIPCode = customerData.postalCode;
-                purchaseData.CustomerPhone = customerData.phone;
-                
-                document.getElementById('loading-message').style.display = 'block';
-                return true; // Allow submission
+              } else {
+                throw new Error(data.message || 'Payment could not be started');
               }
-            });
-          } catch (error) {
-            console.error('Failed to initialize MyPOS SDK:', error);
-            document.getElementById('error-message').style.display = 'block';
-            document.getElementById('error-message').innerHTML = '✗ Failed to load payment form. Please refresh the page.';
-          }
+            } catch (error) {
+              console.error('Error:', error);
+              document.getElementById('loading-message').style.display = 'none';
+              document.getElementById('error-message').style.display = 'block';
+              document.getElementById('error-message').innerHTML = '✗ ' + error.message;
+              document.querySelector('.pay-button').disabled = false;
+            }
+          });
 
-          // Input validation styling
+          // Input validation
           const inputs = document.querySelectorAll('input[required]');
           inputs.forEach(input => {
             input.addEventListener('blur', function() {
@@ -451,11 +354,83 @@ app.get('/checkout', async (req, res) => {
   `);
 });
 
+// Create MyPOS payment - Simple version without complex signature
+app.post('/api/create-mypos-payment', async (req, res) => {
+  try {
+    const { sessionId, customerData, cartData, amount, currency, orderId, returnUrl } = req.body;
+    
+    console.log('Creating MyPOS payment (simple method)');
+
+    pendingPayments.set(sessionId, {
+      customerData,
+      cartData,
+      amount,
+      currency,
+      orderId,
+      returnUrl,
+      created_at: new Date()
+    });
+
+    // Simple payment data without signature for testing
+    const paymentData = {
+      IPCmethod: 'IPCPurchase',
+      IPCVersion: '1.4',
+      IPCLanguage: 'en',
+      SID: MYPOS_SID,
+      WalletNumber: MYPOS_WALLET,
+      Amount: parseFloat(amount).toFixed(2),
+      Currency: currency.toUpperCase(),
+      OrderID: orderId || sessionId,
+      URL_OK: `${APP_URL}/payment/success?session_id=${sessionId}`,
+      URL_Cancel: `${APP_URL}/payment/cancel`,
+      URL_Notify: `${APP_URL}/webhook/mypos`,
+      CustomerEmail: customerData.email,
+      CustomerFirstNames: customerData.firstName,
+      CustomerLastName: customerData.lastName,
+      CustomerAddress: customerData.address,
+      CustomerCity: customerData.city,
+      CustomerZIPCode: customerData.postalCode,
+      CustomerCountry: 'IRL',
+      CustomerPhone: customerData.phone || '',
+      Note: cartData && cartData.items ? cartData.items.map(i => i.title).join(', ') : 'Order'
+    };
+
+    // Try simple HMAC signature
+    const concatenated = Object.keys(paymentData).sort().map(k => paymentData[k]).join('');
+    const signature = crypto.createHmac('sha256', MYPOS_PRIVATE_KEY).update(concatenated).digest('base64');
+    paymentData.Signature = signature;
+
+    // Create form HTML
+    const formHtml = `
+      <form id="mypos-form" method="POST" action="https://www.mypos.com/vmp/checkout">
+        ${Object.keys(paymentData).map(key => 
+          `<input type="hidden" name="${key}" value="${paymentData[key]}">`
+        ).join('\n')}
+      </form>
+      <script>document.getElementById('mypos-form').submit();</script>
+    `;
+
+    console.log('Payment form generated');
+
+    res.json({
+      status: 'success',
+      formHtml: formHtml
+    });
+
+  } catch (error) {
+    console.error('Error:', error.message);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+});
+
 // Payment success
 app.get('/payment/success', (req, res) => {
   const { session_id } = req.query;
   const session = pendingPayments.get(session_id);
-  const returnUrl = session?.return_url || '/';
+  const returnUrl = session?.returnUrl || '/';
   
   res.send(`
     <html>
@@ -541,7 +516,6 @@ app.get('/payment/cancel', (req, res) => {
 app.post('/webhook/mypos', (req, res) => {
   try {
     console.log('MyPOS webhook received:', req.body);
-    // Verify signature here if needed
     res.status(200).send('OK');
   } catch (error) {
     console.error('Webhook error:', error);
@@ -553,6 +527,6 @@ app.post('/webhook/mypos', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 App URL: ${APP_URL}`);
-  console.log(`💳 MyPOS Embedded SDK configured`);
+  console.log(`💳 MyPOS configured (IPC redirect)`);
   console.log(`🔗 Checkout URL: ${APP_URL}/checkout`);
 });
