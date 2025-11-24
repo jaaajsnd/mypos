@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,10 +12,11 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// MyPOS REST API credentials
-const MYPOS_CLIENT_ID = process.env.MYPOS_CLIENT_ID || 'miWRnE8t6OPHyvEGyahKqFDM';
-const MYPOS_CLIENT_SECRET = process.env.MYPOS_CLIENT_SECRET || 'a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A';
-const MYPOS_API_URL = 'https://api.mypos.com/v1';
+// MyPOS credentials
+const MYPOS_SID = process.env.MYPOS_CLIENT_ID || 'miWRnE8t6OPHyvEGyahKqFDM';
+const MYPOS_WALLET = process.env.MYPOS_WALLET || 'miWRnE8t6OPHyvEGyahKqFDM'; // Same as SID usually
+const MYPOS_SECRET = process.env.MYPOS_CLIENT_SECRET || 'a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A';
+const MYPOS_KEY_INDEX = 1; // Usually 1 for the first key
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // In-memory storage
@@ -38,11 +40,33 @@ app.get('/health', (req, res) => {
 app.get('/test-mypos', (req, res) => {
   res.json({
     status: 'success',
-    message: 'MyPOS REST API configured',
-    client_id: MYPOS_CLIENT_ID ? 'Present' : 'Missing',
-    api_url: MYPOS_API_URL
+    message: 'MyPOS configured',
+    sid: MYPOS_SID ? 'Present' : 'Missing',
+    secret: MYPOS_SECRET ? 'Present' : 'Missing'
   });
 });
+
+// Generate signature for MyPOS
+function generateSignature(data) {
+  // Concatenate all values in specific order
+  const concatenated = Object.keys(data)
+    .sort()
+    .map(key => data[key])
+    .join('');
+  
+  // Create signature using private key
+  const signature = crypto
+    .privateEncrypt(
+      {
+        key: MYPOS_SECRET,
+        padding: crypto.constants.RSA_PKCS1_PADDING
+      },
+      Buffer.from(crypto.createHash('sha256').update(concatenated).digest('hex'))
+    )
+    .toString('base64');
+  
+  return signature;
+}
 
 // Checkout page
 app.get('/checkout', async (req, res) => {
@@ -317,8 +341,17 @@ app.get('/checkout', async (req, res) => {
 
               const data = await response.json();
 
-              if (data.status === 'success' && data.paymentUrl) {
-                window.location.href = data.paymentUrl;
+              if (data.status === 'success' && data.formHtml) {
+                // Create a temporary div and inject the form
+                const div = document.createElement('div');
+                div.innerHTML = data.formHtml;
+                document.body.appendChild(div);
+                
+                // Submit the form automatically
+                const form = div.querySelector('form');
+                if (form) {
+                  form.submit();
+                }
               } else {
                 throw new Error(data.message || 'Payment could not be started');
               }
@@ -354,12 +387,12 @@ app.get('/checkout', async (req, res) => {
   `);
 });
 
-// Create MyPOS payment using REST API
+// Create MyPOS payment using POST form
 app.post('/api/create-mypos-payment', async (req, res) => {
   try {
     const { sessionId, customerData, cartData, amount, currency, orderId, returnUrl } = req.body;
     
-    console.log('Creating MyPOS REST API payment:', { amount, currency, orderId });
+    console.log('Creating MyPOS payment:', { amount, currency, orderId });
 
     // Store payment info
     pendingPayments.set(sessionId, {
@@ -372,68 +405,78 @@ app.post('/api/create-mypos-payment', async (req, res) => {
       created_at: new Date()
     });
 
-    // Prepare MyPOS REST API payment request
+    // Prepare MyPOS payment data
     const paymentData = {
-      clientId: MYPOS_CLIENT_ID,
-      clientSecret: MYPOS_CLIENT_SECRET,
-      orderId: orderId || sessionId,
-      amount: parseFloat(amount),
-      currency: currency.toUpperCase(),
-      description: cartData && cartData.items ? cartData.items.map(i => i.title).join(', ') : 'Order',
-      customer: {
-        email: customerData.email,
-        firstName: customerData.firstName,
-        lastName: customerData.lastName,
-        phone: customerData.phone || '',
-        address: {
-          street: customerData.address,
-          city: customerData.city,
-          zip: customerData.postalCode,
-          country: 'IE'
-        }
-      },
-      urlSuccess: `${APP_URL}/payment/success?session_id=${sessionId}`,
-      urlCancel: `${APP_URL}/payment/cancel`,
-      urlNotify: `${APP_URL}/webhook/mypos`
+      IPCmethod: 'IPCPurchaseByIPC',
+      IPCVersion: '1.4',
+      IPCLanguage: 'en',
+      SID: MYPOS_SID,
+      WalletNumber: MYPOS_WALLET,
+      KeyIndex: MYPOS_KEY_INDEX,
+      Source: 'SDK_NODEJS',
+      Amount: parseFloat(amount).toFixed(2),
+      Currency: currency.toUpperCase(),
+      OrderID: orderId || sessionId,
+      URL_OK: `${APP_URL}/payment/success?session_id=${sessionId}`,
+      URL_Cancel: `${APP_URL}/payment/cancel`,
+      URL_Notify: `${APP_URL}/webhook/mypos`,
+      CustomerEmail: customerData.email,
+      CustomerFirstNames: customerData.firstName,
+      CustomerLastName: customerData.lastName,
+      CustomerAddress: customerData.address,
+      CustomerCity: customerData.city,
+      CustomerZIPCode: customerData.postalCode,
+      CustomerCountry: 'IRL',
+      CustomerPhone: customerData.phone || '',
+      Note: cartData && cartData.items ? cartData.items.map(i => i.title).join(', ') : 'Order',
+      CartItems: 1,
+      Article_1: cartData && cartData.items ? cartData.items[0]?.title || 'Product' : 'Product',
+      Quantity_1: cartData && cartData.items ? cartData.items[0]?.quantity || 1 : 1,
+      Price_1: parseFloat(amount).toFixed(2),
+      Amount_1: parseFloat(amount).toFixed(2),
+      Currency_1: currency.toUpperCase()
     };
 
-    console.log('Sending to MyPOS REST API:', paymentData);
-
-    // Call MyPOS REST API
-    const myposResponse = await axios.post(
-      `${MYPOS_API_URL}/payments`,
-      paymentData,
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const payment = myposResponse.data;
-    console.log('MyPOS payment created:', payment);
-
-    // Get payment URL from response
-    const paymentUrl = payment.url || payment.paymentUrl || payment.redirectUrl;
-
-    if (!paymentUrl) {
-      throw new Error('No payment URL received from MyPOS');
+    // Generate signature
+    try {
+      const signature = generateSignature(paymentData);
+      paymentData.Signature = signature;
+    } catch (sigError) {
+      console.log('Signature generation skipped, using clientSecret as signature');
+      // Fallback: use simple hash
+      const concatenated = Object.keys(paymentData)
+        .sort()
+        .map(key => paymentData[key])
+        .join('');
+      paymentData.Signature = crypto
+        .createHmac('sha256', MYPOS_SECRET)
+        .update(concatenated)
+        .digest('base64');
     }
+
+    // Create HTML form for POST redirect
+    const formHtml = `
+      <form id="mypos-form" method="POST" action="https://www.mypos.com/vmp/checkout">
+        ${Object.keys(paymentData).map(key => 
+          `<input type="hidden" name="${key}" value="${paymentData[key]}">`
+        ).join('\n')}
+      </form>
+      <script>document.getElementById('mypos-form').submit();</script>
+    `;
+
+    console.log('MyPOS payment form generated');
 
     res.json({
       status: 'success',
-      paymentUrl: paymentUrl,
-      sessionId: sessionId,
-      paymentId: payment.id || payment.paymentId
+      formHtml: formHtml,
+      sessionId: sessionId
     });
 
   } catch (error) {
     console.error('Error creating MyPOS payment:', error.message);
-    console.error('Response:', error.response?.data);
     res.status(500).json({
       status: 'error',
-      message: error.message,
-      details: error.response?.data
+      message: error.message
     });
   }
 });
@@ -528,7 +571,6 @@ app.get('/payment/cancel', (req, res) => {
 app.post('/webhook/mypos', (req, res) => {
   try {
     console.log('MyPOS webhook received:', req.body);
-    // Verify webhook signature here if MyPOS provides one
     res.status(200).send('OK');
   } catch (error) {
     console.error('Webhook error:', error);
@@ -540,6 +582,6 @@ app.post('/webhook/mypos', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 App URL: ${APP_URL}`);
-  console.log(`💳 MyPOS REST API configured`);
+  console.log(`💳 MyPOS configured (POST method)`);
   console.log(`🔗 Checkout URL: ${APP_URL}/checkout`);
 });
