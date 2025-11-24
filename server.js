@@ -22,7 +22,7 @@ const MYPOS_CHECKOUT_URL = IS_PRODUCTION
 const MYPOS_SID = process.env.MYPOS_CLIENT_ID || '1223015';
 const MYPOS_WALLET = process.env.MYPOS_WALLET || '40850018397';
 const MYPOS_PRIVATE_KEY = process.env.MYPOS_PRIVATE_KEY;
-const MYPOS_KEY_INDEX = 2;  // ← CHANGED FROM 1 TO 2!
+const MYPOS_KEY_INDEX = 2;
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // In-memory storage
@@ -41,22 +41,23 @@ function generateMyPOSSignature(data) {
       .map(key => String(data[key]))
       .join('-');
     
-    console.log('Data to sign:', concatenated.substring(0, 100) + '...');
+    console.log('Concatenated:', concatenated.substring(0, 100) + '...');
     
     // Base64 encode the concatenated string
     const base64Concatenated = Buffer.from(concatenated, 'utf8').toString('base64');
     
     console.log('Base64:', base64Concatenated.substring(0, 50) + '...');
     
-    // Sign the Base64 string
-    const signature = crypto.sign('sha256', Buffer.from(base64Concatenated), {
+    // Sign the Base64 string DIRECTLY with SHA256
+    const signature = crypto.sign('sha256', Buffer.from(base64Concatenated, 'utf8'), {
       key: MYPOS_PRIVATE_KEY,
       padding: crypto.constants.RSA_PKCS1_PADDING
     });
     
+    // Base64 encode the signature
     const signatureBase64 = signature.toString('base64');
     
-    console.log('✅ Signature generated');
+    console.log('✅ Signature generated:', signatureBase64.length, 'chars');
     
     return signatureBase64;
   } catch (error) {
