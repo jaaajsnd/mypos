@@ -15,7 +15,7 @@ app.use(express.static('public'));
 // MyPOS credentials
 const MYPOS_CLIENT_ID = process.env.MYPOS_CLIENT_ID || 'miWRnE8t6OPHyvEGyahKqFDM';
 const MYPOS_CLIENT_SECRET = process.env.MYPOS_CLIENT_SECRET || 'a0JxT5j1veAoP7gaSlhDQNJes236D38iZquYUmllkgUY3a9A';
-const MYPOS_API_URL = 'https://www.mypos.com/vmp/checkout-demo'; // Change to checkout for live
+const MYPOS_API_URL = 'https://www.mypos.com/vmp/checkout-demo';
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // In-memory storage
@@ -69,60 +69,80 @@ app.get('/checkout', async (req, res) => {
         <title>Payment - €${amount}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          * { 
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
+          * { box-sizing: border-box; }
           body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f7f7f7;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
             padding: 20px;
+            margin: 0;
           }
           .container {
             max-width: 600px;
             margin: 0 auto;
             background: white;
             border-radius: 10px;
-            padding: 40px;
+            padding: 30px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
           }
           h1 {
-            font-size: 24px;
-            margin-bottom: 10px;
+            text-align: center;
             color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
           }
           .amount {
-            font-size: 32px;
+            text-align: center;
+            font-size: 48px;
             font-weight: bold;
-            color: #2c6ecb;
+            color: #000;
+            margin: 20px 0;
+          }
+          .description {
+            text-align: center;
+            color: #666;
             margin-bottom: 30px;
+            font-size: 14px;
+          }
+          .section {
+            margin: 30px 0;
+            padding: 20px 0;
+            border-top: 1px solid #e0e0e0;
+          }
+          .section:first-child {
+            border-top: none;
+            padding-top: 0;
+          }
+          .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
           }
           .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 15px;
           }
           label {
             display: block;
             font-size: 14px;
+            color: #555;
+            margin-bottom: 5px;
             font-weight: 500;
-            margin-bottom: 6px;
-            color: #333;
           }
           input {
             width: 100%;
             padding: 12px;
-            border: 1px solid #d9d9d9;
+            border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 14px;
+            font-family: inherit;
           }
           input:focus {
             outline: none;
-            border-color: #2c6ecb;
-            box-shadow: 0 0 0 3px rgba(44, 110, 203, 0.1);
+            border-color: #000;
           }
           .form-row {
             display: flex;
-            gap: 12px;
+            gap: 15px;
           }
           .form-row .form-group {
             flex: 1;
@@ -130,7 +150,7 @@ app.get('/checkout', async (req, res) => {
           .pay-button {
             width: 100%;
             padding: 16px;
-            background: #2c6ecb;
+            background: #000;
             color: white;
             border: none;
             border-radius: 5px;
@@ -140,11 +160,25 @@ app.get('/checkout', async (req, res) => {
             margin-top: 20px;
           }
           .pay-button:hover {
-            background: #1f5bb5;
+            background: #333;
           }
           .pay-button:disabled {
             background: #d9d9d9;
             cursor: not-allowed;
+          }
+          .secure {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+          }
+          .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            display: none;
           }
           .success-popup {
             position: fixed;
@@ -191,27 +225,31 @@ app.get('/checkout', async (req, res) => {
             font-size: 16px;
             color: #666;
           }
-          .error {
-            background: #ffebee;
-            border: 1px solid #f44336;
-            color: #c62828;
-            padding: 16px;
-            border-radius: 5px;
-            margin-top: 20px;
-            display: none;
-          }
           .loading {
             display: none;
             text-align: center;
             padding: 20px;
             color: #666;
           }
+          .back-button {
+            display: block;
+            text-align: center;
+            color: #666;
+            text-decoration: none;
+            margin-top: 20px;
+            padding: 10px;
+            font-size: 14px;
+          }
+          .back-button:hover {
+            color: #000;
+          }
         </style>
       </head>
       <body>
         <div class="container">
-          <h1>💳 Secure Payment with MyPOS</h1>
+          <h1>💳 Secure Checkout</h1>
           <div class="amount">€${amount}</div>
+          <div class="description">Order ${order_id || ''}</div>
           
           <div id="error-message" class="error"></div>
           <div id="loading-message" class="loading">Processing payment...</div>
@@ -225,47 +263,66 @@ app.get('/checkout', async (req, res) => {
           </div>
           
           <form id="payment-form">
-            <div class="form-row">
-              <div class="form-group">
-                <label for="firstName">First Name *</label>
-                <input type="text" id="firstName" placeholder="Sean" required>
+            <div class="section">
+              <div class="section-title">Customer Information</div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="firstName">First Name *</label>
+                  <input type="text" id="firstName" placeholder="Sean" required>
+                </div>
+                <div class="form-group">
+                  <label for="lastName">Last Name *</label>
+                  <input type="text" id="lastName" placeholder="O'Brien" required>
+                </div>
               </div>
+              
               <div class="form-group">
-                <label for="lastName">Last Name *</label>
-                <input type="text" id="lastName" placeholder="O'Brien" required>
+                <label for="email">Email *</label>
+                <input type="email" id="email" placeholder="sean@example.ie" required>
               </div>
-            </div>
-            
-            <div class="form-group">
-              <label for="email">Email Address *</label>
-              <input type="email" id="email" placeholder="sean@example.ie" required>
-            </div>
-            
-            <div class="form-group">
-              <label for="phone">Phone Number</label>
-              <input type="tel" id="phone" placeholder="+353 85 123 4567">
-            </div>
-            
-            <div class="form-group">
-              <label for="address">Address *</label>
-              <input type="text" id="address" placeholder="12 O'Connell Street" required>
-            </div>
-            
-            <div class="form-row">
+              
               <div class="form-group">
-                <label for="postalCode">Eircode *</label>
-                <input type="text" id="postalCode" placeholder="D01 F5P2" required>
-              </div>
-              <div class="form-group">
-                <label for="city">City *</label>
-                <input type="text" id="city" placeholder="Dublin" required>
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" placeholder="+353 85 123 4567">
               </div>
             </div>
-            
+
+            <div class="section">
+              <div class="section-title">Billing Address</div>
+              
+              <div class="form-group">
+                <label for="address">Address *</label>
+                <input type="text" id="address" placeholder="12 O'Connell Street" required>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="postalCode">Eircode *</label>
+                  <input type="text" id="postalCode" placeholder="D01 F5P2" required>
+                </div>
+                <div class="form-group">
+                  <label for="city">City *</label>
+                  <input type="text" id="city" placeholder="Dublin" required>
+                </div>
+              </div>
+              
+              <div class="form-group">
+                <label for="country">Country *</label>
+                <input type="text" id="country" value="Ireland" required>
+              </div>
+            </div>
+
             <button type="submit" class="pay-button">
               Pay Now
             </button>
           </form>
+          
+          <div class="secure">
+            🔒 Secure payment with MyPOS
+          </div>
+          
+          ${return_url ? `<a href="${return_url}" class="back-button">← Back to store</a>` : ''}
         </div>
 
         <script>
@@ -282,11 +339,12 @@ app.get('/checkout', async (req, res) => {
               phone: document.getElementById('phone').value.trim(),
               address: document.getElementById('address').value.trim(),
               postalCode: document.getElementById('postalCode').value.trim(),
-              city: document.getElementById('city').value.trim()
+              city: document.getElementById('city').value.trim(),
+              country: document.getElementById('country').value.trim()
             };
             
             if (!customerData.firstName || !customerData.lastName || !customerData.email || 
-                !customerData.address || !customerData.postalCode || !customerData.city) {
+                !customerData.address || !customerData.postalCode || !customerData.city || !customerData.country) {
               document.getElementById('error-message').style.display = 'block';
               document.getElementById('error-message').innerHTML = '✗ Please fill in all required fields';
               return;
@@ -324,6 +382,24 @@ app.get('/checkout', async (req, res) => {
               document.getElementById('error-message').innerHTML = '✗ ' + error.message;
               document.querySelector('.pay-button').disabled = false;
             }
+          });
+
+          // Input validation styling
+          const inputs = document.querySelectorAll('input[required]');
+          inputs.forEach(input => {
+            input.addEventListener('blur', function() {
+              if (!this.value.trim()) {
+                this.style.borderColor = '#f44336';
+              } else {
+                this.style.borderColor = '#ddd';
+              }
+            });
+            
+            input.addEventListener('input', function() {
+              if (this.value.trim()) {
+                this.style.borderColor = '#4CAF50';
+              }
+            });
           });
         </script>
       </body>
@@ -424,9 +500,9 @@ app.get('/payment/success', (req, res) => {
             font-family: Arial, sans-serif;
             text-align: center;
             padding: 50px;
-            background: #f7f7f7;
+            background: #f5f5f5;
           }
-          .box {
+          .success-box {
             background: white;
             padding: 40px;
             border-radius: 10px;
@@ -444,10 +520,10 @@ app.get('/payment/success', (req, res) => {
         </style>
       </head>
       <body>
-        <div class="box">
+        <div class="success-box">
           <div class="checkmark">✓</div>
           <h1>Payment Successful!</h1>
-          <p>Thank you for your order.</p>
+          <p>Your payment has been processed successfully.</p>
           <p>You will receive a confirmation email shortly.</p>
         </div>
         <script>
@@ -471,7 +547,7 @@ app.get('/payment/cancel', (req, res) => {
             font-family: Arial, sans-serif;
             text-align: center;
             padding: 50px;
-            background: #f7f7f7;
+            background: #f5f5f5;
           }
           .box {
             background: white;
