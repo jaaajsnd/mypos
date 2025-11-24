@@ -120,6 +120,201 @@ app.get('/test-signature', (req, res) => {
   }
 });
 
+app.get('/checkout-widget', async (req, res) => {
+  const { amount, currency, order_id, return_url, cart_items } = req.query;
+  
+  if (!amount || !currency) {
+    return res.status(400).send('Missing required parameters: amount and currency');
+  }
+
+  let cartData = null;
+  if (cart_items) {
+    try {
+      cartData = JSON.parse(decodeURIComponent(cart_items));
+    } catch (e) {
+      console.error('Error parsing cart_items:', e);
+    }
+  }
+
+  const sessionId = Date.now().toString();
+
+  res.send(`
+    <html>
+      <head>
+        <title>Payment - €${amount}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <script src="https://www.mypos.com/vmp/js/mypos-embedded-1.0.2.js"></script>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            margin: 0;
+          }
+          .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+          }
+          h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+          }
+          .amount {
+            text-align: center;
+            font-size: 48px;
+            font-weight: bold;
+            color: #000;
+            margin: 20px 0;
+          }
+          #mypos-widget {
+            margin: 30px 0;
+            min-height: 400px;
+          }
+          .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            display: none;
+          }
+          .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>💳 Secure Checkout</h1>
+          <div class="amount">€${amount}</div>
+          
+          <div id="error-message" class="error"></div>
+          <div id="loading-message" class="loading">Loading payment form...</div>
+          
+          <div id="mypos-widget"></div>
+        </div>
+
+        <script>
+          const sessionId = '${sessionId}';
+          const cartData = ${cartData ? JSON.stringify(cartData) : 'null'};
+
+          async function initializePayment() {
+            try {
+              // Get payment data from server
+              const response = await fetch('/api/create-mypos-widget-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: sessionId,
+                  amount: '${amount}',
+                  currency: '${currency}',
+                  orderId: '${order_id || ''}',
+                  returnUrl: '${return_url || APP_URL}',
+                  cartData: cartData
+                })
+              });
+
+              const data = await response.json();
+              console.log('Payment data:', data);
+
+              if (data.status !== 'success') {
+                throw new Error(data.message || 'Could not initialize payment');
+              }
+
+              document.getElementById('loading-message').style.display = 'none';
+
+              // Initialize MyPOS widget
+              if (typeof MYPOSSDK !== 'undefined') {
+                MYPOSSDK.Checkout.init({
+                  sid: '${MYPOS_SID}',
+                  walletNumber: '${MYPOS_WALLET}',
+                  keyIndex: ${MYPOS_KEY_INDEX},
+                  amount: '${amount}',
+                  currency: '${currency}',
+                  orderId: data.orderId,
+                  isSandbox: ${!IS_PRODUCTION},
+                  container: 'mypos-widget',
+                  onSuccess: function(result) {
+                    console.log('Payment successful:', result);
+                    window.location.href = '/payment/success?session_id=' + sessionId;
+                  },
+                  onError: function(error) {
+                    console.error('Payment error:', error);
+                    document.getElementById('error-message').style.display = 'block';
+                    document.getElementById('error-message').innerHTML = '✗ Payment failed: ' + (error.message || 'Unknown error');
+                  },
+                  onCancel: function() {
+                    console.log('Payment cancelled');
+                    window.location.href = '/payment/cancel';
+                  }
+                });
+              } else {
+                throw new Error('MyPOS SDK not loaded');
+              }
+            } catch (error) {
+              console.error('Error:', error);
+              document.getElementById('loading-message').style.display = 'none';
+              document.getElementById('error-message').style.display = 'block';
+              document.getElementById('error-message').innerHTML = '✗ ' + error.message;
+            }
+          }
+
+          // Wait for SDK to load
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializePayment);
+          } else {
+            initializePayment();
+          }
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+app.post('/api/create-mypos-widget-payment', async (req, res) => {
+  try {
+    const { sessionId, amount, currency, orderId, returnUrl, cartData } = req.body;
+    
+    console.log('=== Creating MyPOS Widget Payment ===');
+    console.log('Mode:', IS_PRODUCTION ? 'PRODUCTION' : 'TEST');
+    console.log('Amount:', amount, currency);
+
+    const paymentOrderId = orderId || `ORDER-${sessionId}`;
+
+    pendingPayments.set(sessionId, {
+      amount,
+      currency,
+      orderId: paymentOrderId,
+      returnUrl,
+      cartData,
+      created_at: new Date()
+    });
+
+    res.json({
+      status: 'success',
+      orderId: paymentOrderId,
+      amount: amount,
+      currency: currency
+    });
+
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+});
+
 app.get('/checkout', async (req, res) => {
   const { amount, currency, order_id, return_url, cart_items } = req.query;
   
@@ -621,4 +816,10 @@ app.listen(PORT, () => {
   console.log(`🔑 Key Index: ${MYPOS_KEY_INDEX}`);
   console.log(`🔗 Checkout URL: ${MYPOS_CHECKOUT_URL}`);
   console.log(`🧪 Test signature: ${APP_URL}/test-signature`);
+  console.log(`🎨 Widget checkout: ${APP_URL}/checkout-widget?amount=5.00&currency=EUR`);
 });
+```
+
+**Deploy en test met:**
+```
+https://mypos-vr2b.onrender.com/checkout-widget?amount=5.00&currency=EUR
